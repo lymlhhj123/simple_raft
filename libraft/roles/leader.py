@@ -1,7 +1,7 @@
 # coding: utf-8
 
 from .role import Role
-from .. import rpc_models
+from .. import models
 
 
 class Leader(Role):
@@ -21,9 +21,8 @@ class Leader(Role):
         self.raft.start_heartbeat()
 
     def process_vote_ack(self, rpc):
-        """处理其他成员请求投票的ack
+        """handle vote ack from other members
 
-        we are already leader
         :param rpc:
         :return:
         """
@@ -48,12 +47,12 @@ class Leader(Role):
         """handle request vote rpc from candidate
 
         if candidate's term <= our term, reply false;
-        f candidate's term > our term, reply true;
+        if candidate's term > our term, reply true;
         :param rpc:
         :return:
         """
         data = self._process_vote_rpc(rpc)
-        vote_ack = rpc_models.VoteAckRpc(data, self.raft.my_id())
+        vote_ack = models.VoteAckRpc(data, self.raft.my_id())
         self.raft.send_rpc(rpc.mem_id, vote_ack)
 
         if data["voteGranted"] is True:
@@ -100,7 +99,7 @@ class Leader(Role):
         self._maybe_append_entries_alone()
 
     def _maybe_append_entries_alone(self):
-        """对应的follower的日志可能跟leader不匹配，需要减少nextIndex，然后重试
+        """maybe follower's log is not same as us
 
         :return:
         """

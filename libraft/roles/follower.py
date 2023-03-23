@@ -1,7 +1,7 @@
 # coding: utf-8
 
 from .role import Role
-from .. import rpc_models
+from .. import models
 
 
 class Follower(Role):
@@ -39,7 +39,7 @@ class Follower(Role):
         :return:
         """
         data = self._process_vote_rpc(rpc)
-        vote_ack = rpc_models.VoteAckRpc(data, self.raft.my_id())
+        vote_ack = models.VoteAckRpc(data, self.raft.my_id())
         self.raft.send_rpc(rpc.mem_id, vote_ack)
 
         if data["voteGranted"] is True:
@@ -101,7 +101,7 @@ class Follower(Role):
         if not result:
             return
 
-        rpc_ack = rpc_models.AppendEntriesAckRpc(result, self.raft.my_id())
+        rpc_ack = models.AppendEntriesAckRpc(result, self.raft.my_id())
         self.raft.send_rpc(rpc.mem_id, rpc_ack)
 
     def _process_append_entries_rpc(self, rpc):

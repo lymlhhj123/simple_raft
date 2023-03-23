@@ -2,7 +2,7 @@
 
 
 from .role import Role
-from .. import rpc_models
+from .. import models
 
 
 class Candidate(Role):
@@ -21,7 +21,7 @@ class Candidate(Role):
         self.raft.set_election_timeout()
 
     def process_vote_ack(self, rpc):
-        """处理其他成员处理投票请求的ack
+        """
 
         :param rpc:
         :return:
@@ -48,14 +48,13 @@ class Candidate(Role):
             self.raft.election_victory()
 
     def process_vote_rpc(self, rpc):
-        """处理其他候选人发起的投票请求
+        """
 
-        此时我们自己就是候选人
         :param rpc:
         :return:
         """
         data = self._process_vote_rpc(rpc)
-        ack_rpc = rpc_models.VoteAckRpc(data, self.raft.my_id)
+        ack_rpc = models.VoteAckRpc(data, self.raft.my_id)
         self.raft.send_rpc(rpc.mem_id, ack_rpc)
 
         if data["voteGranted"] is True:

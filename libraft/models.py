@@ -12,7 +12,7 @@ class Rpc(object):
 
         self.op = op
         self.data = data
-        # 节点的id，表示rpc消息的来源
+        # node id, the rpc is sent by who
         self.mem_id = mem_id
 
     def as_json(self):

@@ -1,6 +1,6 @@
 # coding: utf-8
 
-from ..rpc_models import Rpc
+from ..models import Rpc
 
 from libreactor.basic_protocols import MessageReceiver
 

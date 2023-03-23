@@ -6,7 +6,7 @@ import random
 
 from .storage import Storage
 from . import roles
-from .rpc_models import Rpc
+from .models import Rpc
 
 from libreactor.event_loop_thread import EventLoopThread
 
@@ -377,9 +377,8 @@ class Raft(object):
         # todo: send vote rpc to all members
 
     def set_election_timeout(self):
-        """设置选举超时的计时器，由candidate调用
+        """set election timeout, timeout is between 150 - 300 msec
 
-        选举超时的时间在150 - 300毫秒之间
         :return:
         """
         assert self._my_role.is_candidate()
@@ -394,7 +393,7 @@ class Raft(object):
         self.to_candidate()
 
     def cancel_election_timeout(self):
-        """取消选举超时的计时器，由candidate调用
+        """candidate cancel election timeout
 
         :return:
         """
@@ -403,7 +402,7 @@ class Raft(object):
             self._election_timeout_timer.cancel()
 
     def do_i_election_win(self):
-        """判断选举是否成功，由候选人调用
+        """check if we win the election
 
         :return:
         """
@@ -411,7 +410,7 @@ class Raft(object):
         return len(self.quorums()) >= (len(self.members()) / 2 + 1)
 
     def election_victory(self):
-        """选举成功，由候选人调用
+        """candidate win election
 
         :return:
         """
@@ -419,27 +418,27 @@ class Raft(object):
         self.to_leader()
 
     def start_heartbeat(self):
-        """开启与quorum成员的心跳，由leader调用
+        """leader start heartbeat after win election
 
         :return:
         """
         assert self._my_role.is_leader()
 
     def send_heartbeat(self):
-        """
+        """leader send heartbeat to members
 
         :return:
         """
 
     def stop_heartbeat(self):
-        """取消与quorum成员的心跳，由leader调用
+        """leader stop heartbeat with members
 
         :return:
         """
         assert self._my_role.is_leader()
 
     def reset_heartbeat_timeout(self):
-        """重置心跳的超时计时器，由follower调用
+        """follower reset heartbeat timeout
 
         :return:
         """
@@ -447,7 +446,7 @@ class Raft(object):
         self.set_heartbeat_timeout()
 
     def set_heartbeat_timeout(self):
-        """设置心跳的超时计时器，由follower调用
+        """follower set heartbeat timeout
 
         :return:
         """
@@ -462,7 +461,7 @@ class Raft(object):
         self.to_candidate()
 
     def cancel_heartbeat_timeout(self):
-        """取消心跳的超时计时器，由follower调用
+        """follower cancel heartbeat timeout
 
         :return:
         """
