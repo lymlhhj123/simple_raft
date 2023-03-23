@@ -118,7 +118,14 @@ class Raft(object):
         :return:
         """
 
-    def set_match_index(self, mem_id, log_idx):
+    def match_index(self):
+        """
+
+        :return:
+        """
+        return self._match_index
+
+    def update_match_index(self, mem_id, log_idx):
         """
 
         :param mem_id:
@@ -140,14 +147,22 @@ class Raft(object):
         :return:
         """
 
-    def set_next_index(self, mem_id, log_idx):
+    def dec_next_index(self, mem_id):
         """
 
         :param mem_id:
-        :param log_idx:
         :return:
         """
-        self._next_index[mem_id] = log_idx
+        self._next_index[mem_id] -= 1
+
+    def update_next_index(self, mem_id, log_index):
+        """
+
+        :param mem_id:
+        :param log_index:
+        :return:
+        """
+        self._next_index[mem_id] = log_index
 
     def clear_next_index(self):
         """

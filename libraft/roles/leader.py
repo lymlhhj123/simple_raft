@@ -82,27 +82,75 @@ class Leader(Role):
         """
         rpc_data = rpc.data
         ack_term = rpc_data["term"]
+        current_term = self.raft.current_term
 
-        if ack_term > self.raft.current_term:
+        if ack_term > current_term:
             self.raft.stop_heartbeat()
             self.raft.vote_for = -1
             self.raft.to_follower()
             return
 
+        if ack_term < current_term:
+            return
+
         if rpc_data["success"] is False:
-            # dec nextIndex
-            pass
+            self._follower_reply_failed(rpc.mem_id)
         else:
-            # inc nextIndex
-            pass
+            self._follower_reply_success(rpc.mem_id)
 
-        self._maybe_append_entries_alone()
+        self._update_commit_index()
+        self.raft.request_append_entries()
 
-    def _maybe_append_entries_alone(self):
-        """maybe follower's log is not same as us
+    def _follower_reply_failed(self, follower_id):
+        """
+
+        :param follower_id:
+        :return:
+        """
+        self.raft.dec_next_index(follower_id)
+
+    def _follower_reply_success(self, follower_id):
+        """
+
+        :param follower_id:
+        :return:
+        """
+        log_index = self.raft.last_log_index()
+        self.raft.update_next_index(follower_id, log_index)
+        self.raft.update_match_index(follower_id, log_index)
+
+    def _update_commit_index(self):
+        """
 
         :return:
         """
+        match_index = self.raft.match_index()
+        index_map = {}
+        for _, index in match_index.items():
+            index_map.setdefault(index, 0)
+            index_map[index] += 1
+
+        node_count = len(self.raft.members())
+        pre_match_index = 0
+        for index, count in index_map.items():
+            if count >= (node_count / 2 + 1):
+                pre_match_index = index
+                break
+
+        if pre_match_index == 0:
+            return
+
+        log_entry = self.raft.get_log_entry(pre_match_index)
+        assert log_entry
+
+        if log_entry.term != self.raft.current_term:
+            return
+
+        if pre_match_index <= self.raft.commit_index:
+            return
+
+        self.raft.commit_index = pre_match_index
+        self.raft.apply_log_entries()
 
     def process_append_entries_rpc(self, rpc):
         """

@@ -117,12 +117,9 @@ class Follower(Role):
         if leader_term < current_term:
             return {"term": leader_term, "success": False}
 
-        # todo: don't replay ack
+        # todo: maybe something wrong
         if leader_term == current_term:
-            vote_for = self.raft.vote_for
-            if vote_for == -1:
-                self.raft.vote_for = leader_id
-                return
+            assert self.raft.vote_for == leader_id
 
         if leader_term > current_term:
             self.raft.current_term = leader_term
@@ -147,7 +144,7 @@ class Follower(Role):
         :return:
         """
         log_entry = self.raft.get_log(log_index)
-        if not log_entry or log_entry["term"] != log_term:
+        if not log_entry or log_entry.term != log_term:
             return False
 
         return True
@@ -162,15 +159,15 @@ class Follower(Role):
         log_offset = 0
         for offset, entry in enumerate(log_entries):
             log_offset = offset
-            local_entry = self.raft.get_log_entry(entry["index"])
-            if not local_entry:
+            my_entry = self.raft.get_log_entry(entry.index)
+            if not my_entry:
                 break
 
-            if local_entry["term"] != entry["term"]:
-                self.raft.delete_log_entries(entry["index"])
+            if my_entry.term != entry.term:
+                self.raft.delete_log_entries(my_entry.index)
                 break
 
         log_entries = log_entries[log_offset:]
         if log_entries:
             self.raft.save_log_entries(log_entries)
-            self.raft.commit_index = min(leader_commit, log_entries[-1]["index"])
+            self.raft.commit_index = min(leader_commit, log_entries[-1].index)
