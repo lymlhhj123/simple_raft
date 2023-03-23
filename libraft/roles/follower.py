@@ -89,7 +89,12 @@ class Follower(Role):
         :param rpc:
         :return:
         """
-        append_entries_ack = rpc.data
+        rpc_data = rpc.data
+        ack_term = rpc_data["term"]
+        if ack_term > self.raft.current_term:
+            self.raft.current_term = ack_term
+            self.raft.vote_for = -1
+            self.raft.reset_heartbeat_timeout()
 
     def process_append_entries_rpc(self, rpc):
         """

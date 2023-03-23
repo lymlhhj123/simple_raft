@@ -83,6 +83,14 @@ class Candidate(Role):
         :param rpc:
         :return:
         """
+        rpc_data = rpc.data
+        ack_term = rpc_data["term"]
+
+        if ack_term > self.raft.current_term:
+            self.raft.current_term = ack_term
+            self.raft.vote_for = -1
+            self.raft.cancel_election_timeout()
+            self.raft.to_follower()
 
     def process_append_entries_rpc(self, rpc):
         """
