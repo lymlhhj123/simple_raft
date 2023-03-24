@@ -300,21 +300,28 @@ class Raft(object):
         return self._vote_for
 
     @vote_for.setter
-    def vote_for(self, vote_for):
+    def vote_for(self, candidate_id):
         """
 
-        :param vote_for:
+        :param candidate_id:
         :return:
         """
-        self._vote_for = vote_for
+        self._vote_for = candidate_id
 
     def apply_log_entries(self):
         """
 
         :return:
         """
-        if self._commit_index > self._last_applied:
-            pass
+        assert self.last_applied <= self.commit_index
+        start_index = self.last_applied + 1
+
+        while start_index <= self.commit_index:
+            log_entry = self.get_log_entry(start_index)
+            # todo: apply log entry
+            start_index += 1
+
+        self.last_applied = self.commit_index
 
     def save_log_entries(self, log_entries):
         """
@@ -345,6 +352,22 @@ class Raft(object):
         :param log_start_index:
         :return:
         """
+
+    def is_log_newer_than_our(self, last_log_term, last_log_index):
+        """
+
+        :param last_log_term:
+        :param last_log_index:
+        :return:
+        """
+        if last_log_term > self.last_log_term():
+            return True
+
+        if last_log_term == self.last_log_term():
+            if last_log_index >= self.last_log_index():
+                return True
+
+        return False
 
     def dispatch_rpc(self, rpc):
         """

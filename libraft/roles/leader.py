@@ -55,10 +55,6 @@ class Leader(Role):
         vote_ack = models.VoteAckRpc(data, self.raft.my_id())
         self.raft.send_rpc(rpc.mem_id, vote_ack)
 
-        if data["voteGranted"] is True:
-            self.raft.stop_heartbeat()
-            self.raft.to_follower()
-
     def _process_vote_rpc(self, rpc):
         """
 
@@ -66,13 +62,23 @@ class Leader(Role):
         :return:
         """
         vote_msg = rpc.data
+        vote_term = vote_msg["term"]
+        candidate_id = vote_msg["candidateId"]
         current_term = self.raft.current_term
-        if vote_msg["term"] <= current_term:
+        if vote_term <= current_term:
             return {"term": current_term, "voteGranted": False}
 
-        self.raft.term = vote_msg["term"]
-        self.raft.vote_who = vote_msg["candidateId"]
-        return {"term": vote_msg["term"], "voteGranted": True}
+        self.raft.current_term = vote_term
+
+        if self.raft.is_log_newer_than_our(vote_msg["lastLogTerm"], vote_msg["lastLogIndex"]):
+            vote_granted = True
+        else:
+            vote_granted = False
+
+        self.raft.stop_heartbeat()
+        self.raft.vote_for = candidate_id if vote_granted else -1
+        self.raft.to_follower()
+        return {"term": vote_term, "voteGranted": vote_granted}
 
     def process_append_entries_ack(self, rpc):
         """

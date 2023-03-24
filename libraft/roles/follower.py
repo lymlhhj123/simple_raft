@@ -42,46 +42,34 @@ class Follower(Role):
         vote_ack = models.VoteAckRpc(data, self.raft.my_id())
         self.raft.send_rpc(rpc.mem_id, vote_ack)
 
-        if data["voteGranted"] is True:
-            self.raft.reset_heartbeat_timeout()
-
     def _process_vote_rpc(self, rpc):
         """
 
         :param rpc:
         :return:
         """
-        vote_syn = rpc.data
-        vote_term = vote_syn["term"]
-        candidate_id = vote_syn["candidateId"]
+        vote_msg = rpc.data
+        vote_term = vote_msg["term"]
+        candidate_id = vote_msg["candidateId"]
         current_term = self.raft.current_term
         if vote_term < current_term:
             return {"term": current_term, "voteGranted": False}
 
         if vote_term > current_term:
-            self.raft.vote_for = candidate_id
             self.raft.current_term = vote_term
-            return {"term": vote_term, "voteGranted": True}
+            self.raft.vote_for = -1
 
-        # 一个任期号只能投票一次
-        if self.raft.vote_for != -1 or self.raft.vote_for != candidate_id:
+        if self.raft.vote_for != -1 and self.raft.vote_for != candidate_id:
             return {"term": vote_term, "voteGranted": False}
 
-        last_log_term = vote_syn["lastLogTerm"]
-        last_log_index = vote_syn["lastLogIndex"]
+        if self.raft.is_log_newer_than_our(vote_msg["lastLogTerm"], vote_msg["lastLogIndex"]):
+            vote_granted = True
+        else:
+            vote_granted = False
 
-        # 最后一条日志的任期比自己旧，拒绝投票
-        if last_log_term < self.raft.last_log_term():
-            return {"term": current_term, "voteGranted": False}
-
-        # 最后一条日志的任期比自己大，或者最后一条日志的索引不比自己小，同意投票
-        # 如果最后一条日志的任期跟自己相等，但是索引比自己的小，不能投票
-        if last_log_term > self.raft.last_log_term() or last_log_index >= self.raft.last_log_index():
-            self.raft.vote_for = candidate_id
-            return {"term": vote_term, "voteGranted": True}
-
-        self.raft.vote_for = -1
-        return {"term": vote_term, "voteGranted": False}
+        self.raft.vote_for = candidate_id if vote_granted else -1
+        self.raft.reset_heartbeat_timeout()
+        return {"term": vote_term, "voteGranted": vote_granted}
 
     def process_append_entries_ack(self, rpc):
         """

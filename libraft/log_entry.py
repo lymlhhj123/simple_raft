@@ -11,22 +11,23 @@ class LogEntry(object):
         self.term = term
         self.data = data
 
-    def dump(self):
+    @classmethod
+    def from_json(cls, json_obj):
+        """
+
+        :param json_obj:
+        :return:
+        """
+        return cls(**json.loads(json_obj))
+
+    def to_json(self):
         """
 
         :return:
         """
-        return json.dumps({
+        v = {
             "index": self.index,
             "term": self.term,
             "data": self.data,
-        })
-
-    @classmethod
-    def load(cls, obj):
-        """
-
-        :param obj:
-        :return:
-        """
-        return cls(**json.loads(obj))
+        }
+        return json.dumps(v)
