@@ -73,7 +73,7 @@ class Candidate(Role):
 
         self.raft.current_term = vote_term
 
-        if self.raft.is_log_newer_than_our(vote_msg["lastLogTerm"], vote_msg["lastLogIndex"]):
+        if self.raft.is_log_newer_than_us(vote_msg["lastLogTerm"], vote_msg["lastLogIndex"]):
             vote_granted = True
         else:
             vote_granted = False

@@ -353,7 +353,7 @@ class Raft(object):
         :return:
         """
 
-    def is_log_newer_than_our(self, last_log_term, last_log_index):
+    def is_log_newer_than_us(self, last_log_term, last_log_index):
         """
 
         :param last_log_term:

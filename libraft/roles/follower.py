@@ -62,7 +62,7 @@ class Follower(Role):
         if self.raft.vote_for != -1 and self.raft.vote_for != candidate_id:
             return {"term": vote_term, "voteGranted": False}
 
-        if self.raft.is_log_newer_than_our(vote_msg["lastLogTerm"], vote_msg["lastLogIndex"]):
+        if self.raft.is_log_newer_than_us(vote_msg["lastLogTerm"], vote_msg["lastLogIndex"]):
             vote_granted = True
         else:
             vote_granted = False

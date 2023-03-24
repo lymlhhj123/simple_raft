@@ -29,13 +29,14 @@ class Leader(Role):
         vote_ack = rpc.data
         ack_term = vote_ack["term"]
         current_term = self.raft.current_term
-        if ack_term > current_term:
-            self.raft.current_term = ack_term
-            self.raft.stop_heartbeat()
-            self.raft.to_follower()
+        if ack_term < current_term:
             return
 
-        if ack_term < current_term:
+        if ack_term > current_term:
+            self.raft.stop_heartbeat()
+            self.raft.current_term = ack_term
+            self.raft.vote_for = -1
+            self.raft.to_follower()
             return
 
         if vote_ack["voteGranted"] is False:
@@ -70,7 +71,7 @@ class Leader(Role):
 
         self.raft.current_term = vote_term
 
-        if self.raft.is_log_newer_than_our(vote_msg["lastLogTerm"], vote_msg["lastLogIndex"]):
+        if self.raft.is_log_newer_than_us(vote_msg["lastLogTerm"], vote_msg["lastLogIndex"]):
             vote_granted = True
         else:
             vote_granted = False
