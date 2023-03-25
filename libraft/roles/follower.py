@@ -18,9 +18,8 @@ class Follower(Role):
         self.raft.reset_heartbeat_timeout()
 
     def process_vote_ack(self, rpc):
-        """处理请求投票ack的rpc
+        """
 
-        我们的身份是follower，可能我们之前发起选举，之后接受到了一个更大的term，身份由候选人变成了跟随者。
         :param rpc:
         :return:
         """
@@ -33,7 +32,7 @@ class Follower(Role):
             self.raft.reset_heartbeat_timeout()
 
     def process_vote_rpc(self, rpc):
-        """处理来自候选人请求投票的rpc
+        """
 
         :param rpc:
         :return:
@@ -55,12 +54,12 @@ class Follower(Role):
         if vote_term < current_term:
             return {"term": current_term, "voteGranted": False}
 
+        if vote_term == current_term:
+            if self.raft.vote_for != -1 and self.raft.vote_for != candidate_id:
+                return {"term": vote_term, "voteGranted": False}
+
         if vote_term > current_term:
             self.raft.current_term = vote_term
-            self.raft.vote_for = -1
-
-        if self.raft.vote_for != -1 and self.raft.vote_for != candidate_id:
-            return {"term": vote_term, "voteGranted": False}
 
         if self.raft.is_log_newer_than_us(vote_msg["lastLogTerm"], vote_msg["lastLogIndex"]):
             vote_granted = True
@@ -91,9 +90,6 @@ class Follower(Role):
         :return:
         """
         result = self._process_append_entries_rpc(rpc)
-        if not result:
-            return
-
         rpc_ack = models.AppendEntriesAckRpc(result, self.raft.my_id())
         self.raft.send_rpc(rpc.mem_id, rpc_ack)
 
@@ -108,11 +104,11 @@ class Follower(Role):
         leader_term = rpc_data["term"]
         leader_id = rpc_data["leaderId"]
         if leader_term < current_term:
-            return {"term": leader_term, "success": False}
+            return {"term": current_term, "success": False}
 
-        # todo: maybe something wrong
-        if leader_term == current_term:
-            assert self.raft.vote_for == leader_id
+        # what happened?
+        if leader_term == current_term and self.raft.vote_for != leader_id:
+            return {"term": current_term, "success": False}
 
         if leader_term > current_term:
             self.raft.current_term = leader_term
@@ -120,27 +116,15 @@ class Follower(Role):
 
         prev_log_index = rpc_data["prevLogIndex"]
         prev_log_term = rpc_data["prevLogTerm"]
-        if not self._check_log_entry(prev_log_index, prev_log_term):
+        if not self.raft.do_i_have_log_entry(prev_log_index, prev_log_term):
             succeed = False
         else:
-            self._append_entries(rpc_data["entries"], rpc_data["leaderCommit"])
-            self.raft.apply_log_entries()
             succeed = True
+            self.raft.append_log_entries(rpc_data["entries"], rpc_data["leaderCommit"])
+            self.raft.apply_log_entries()
 
         self.raft.reset_heartbeat_timeout()
         return {"term": leader_term, "success": succeed}
-
-    def _check_log_entry(self, log_index, log_term):
-        """
-
-        :param log_index:
-        :return:
-        """
-        log_entry = self.raft.get_log(log_index)
-        if not log_entry or log_entry.term != log_term:
-            return False
-
-        return True
 
     def _append_entries(self, log_entries, leader_commit):
         """

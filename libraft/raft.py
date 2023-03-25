@@ -1,12 +1,12 @@
 # coding: utf-8
 
 import os
-import typing
 import random
 
 from .storage import Storage
 from . import roles
 from .models import Rpc
+from .log_entry import LogEntry
 
 from libreactor.event_loop_thread import EventLoopThread
 
@@ -30,7 +30,7 @@ class Raft(object):
         self._next_index = {}
         self._match_index = {}
 
-        self._my_role: typing.Union[roles.Role, None] = None
+        self._my_role = None
         self._my_id = -1
         self._my_name = os.uname()[1]
 
@@ -53,6 +53,8 @@ class Raft(object):
         self._heartbeat_interval = 0.2
 
         self._election_timeout_timer = None
+
+        self._heartbeat_timer = None
         self._heartbeat_timeout_timer = None
 
     def members(self):
@@ -98,6 +100,7 @@ class Raft(object):
         """
         return self._storage
 
+    @property
     def last_log_index(self):
         """
 
@@ -105,6 +108,16 @@ class Raft(object):
         """
         return self._last_log_index
 
+    @last_log_index.setter
+    def last_log_index(self, log_index):
+        """
+
+        :param log_index:
+        :return:
+        """
+        self._last_log_index = log_index
+
+    @property
     def last_log_term(self):
         """
 
@@ -112,18 +125,27 @@ class Raft(object):
         """
         return self._last_log_term
 
+    @last_log_term.setter
+    def last_log_term(self, log_term):
+        """
+
+        :param log_term:
+        :return:
+        """
+        self._last_log_term = log_term
+
     def init_match_index(self):
         """
 
         :return:
         """
 
-    def match_index(self):
+    def match_index(self, mem_id):
         """
 
         :return:
         """
-        return self._match_index
+        return self._match_index[mem_id]
 
     def update_match_index(self, mem_id, log_idx):
         """
@@ -232,10 +254,10 @@ class Raft(object):
 
         :return:
         """
-        self._commit_index = self._storage.get_uint64("commitIndex", 0)
-        self._last_applied = self._storage.get_uint64("lastApplied", 0)
-        self._current_term = self._storage.get_uint64("currentTerm", 0)
-        self._vote_for = self._storage.get_int64("voteFor", -1)
+        self._commit_index = self.storage().get_uint64("commitIndex", 0)
+        self._last_applied = self.storage().get_uint64("lastApplied", 0)
+        self._current_term = self.storage().get_uint64("currentTerm", 0)
+        self._vote_for = self.storage().get_int64("voteFor", -1)
 
     @property
     def commit_index(self):
@@ -246,14 +268,14 @@ class Raft(object):
         return self._commit_index
 
     @commit_index.setter
-    def commit_index(self, commit_idx):
+    def commit_index(self, log_index):
         """
 
-        :param commit_idx:
+        :param log_index:
         :return:
         """
-        self._commit_index = commit_idx
-        self._storage.put_uint64("commitIndex", commit_idx)
+        self._commit_index = log_index
+        self._storage.put_uint64("commitIndex", log_index)
 
     @property
     def last_applied(self):
@@ -264,14 +286,14 @@ class Raft(object):
         return self._last_applied
 
     @last_applied.setter
-    def last_applied(self, last_idx):
+    def last_applied(self, log_index):
         """
 
-        :param last_idx:
+        :param log_index:
         :return:
         """
-        self._last_applied = last_idx
-        self._storage.put_uint64("lastApplied", last_idx)
+        self._last_applied = log_index
+        self._storage.put_uint64("lastApplied", log_index)
 
     @property
     def current_term(self):
@@ -308,6 +330,38 @@ class Raft(object):
         """
         self._vote_for = candidate_id
 
+    def append_log_entries(self, log_entries, leader_commit):
+        """
+
+        :param log_entries:
+        :param leader_commit:
+        :return:
+        """
+        log_offset = 0
+        for offset, entry in enumerate(log_entries):
+            log_offset = offset
+            my_entry = self.get_log_entry(entry.index)
+            if not my_entry:
+                break
+
+            if my_entry.term != entry.term:
+                self.delete_log_entries(my_entry.index)
+                break
+
+        log_entries = log_entries[log_offset:]
+        if log_entries:
+            self.save_log_entries(log_entries)
+            self.commit_index = min(leader_commit, log_entries[-1].index)
+            self.last_log_index = log_entries[-1].index
+            self.last_log_term = log_entries[-1].term
+
+    def save_log_entries(self, log_entries):
+        """
+
+        :param log_entries:
+        :return:
+        """
+
     def apply_log_entries(self):
         """
 
@@ -323,13 +377,6 @@ class Raft(object):
 
         self.last_applied = self.commit_index
 
-    def save_log_entries(self, log_entries):
-        """
-
-        :param log_entries:
-        :return:
-        """
-
     def get_log_entry(self, log_index):
         """
 
@@ -337,7 +384,8 @@ class Raft(object):
         :return:
         """
         # todo
-        self.storage().get()
+        entry_raw = self.storage().get(log_index)
+        return LogEntry.from_json(entry_raw)
 
     def delete_log_entry(self, log_index):
         """
@@ -346,12 +394,14 @@ class Raft(object):
         :return:
         """
 
-    def delete_log_entries(self, log_start_index):
+    def delete_log_entries(self, start_index):
         """
 
-        :param log_start_index:
+        :param start_index:
         :return:
         """
+        for log_index in range(start_index, self.last_log_index + 1):
+            self.storage().delete(log_index)
 
     def is_log_newer_than_us(self, last_log_term, last_log_index):
         """
@@ -360,14 +410,27 @@ class Raft(object):
         :param last_log_index:
         :return:
         """
-        if last_log_term > self.last_log_term():
+        if last_log_term > self.last_log_term:
             return True
 
-        if last_log_term == self.last_log_term():
-            if last_log_index >= self.last_log_index():
+        if last_log_term == self.last_log_term:
+            if last_log_index >= self.last_log_index:
                 return True
 
         return False
+
+    def do_i_have_log_entry(self, log_index, log_term):
+        """
+
+        :param log_index:
+        :param log_term:
+        :return:
+        """
+        log_entry = self.get_log_entry(log_index)
+        if not log_entry or log_entry.term != log_term:
+            return False
+
+        return True
 
     def dispatch_rpc(self, rpc):
         """
@@ -402,14 +465,13 @@ class Raft(object):
 
         :return:
         """
-        # vote for self
         self.vote_for = self.my_id()
 
         vote_msg = {
             "term": self.current_term,
             "candidateId": self.my_id(),
-            "lastLogIndex": self.last_log_index(),
-            "lastLogTerm": self.last_log_term(),
+            "lastLogIndex": self.last_log_index,
+            "lastLogTerm": self.last_log_term,
         }
 
         # todo: send vote rpc to all members
@@ -461,6 +523,7 @@ class Raft(object):
         :return:
         """
         assert self._my_role.is_leader()
+        self._heartbeat_timer = self._ev.call_every(self._heartbeat_interval, self.send_heartbeat)
 
     def send_heartbeat(self):
         """leader send heartbeat to members
@@ -474,6 +537,9 @@ class Raft(object):
         :return:
         """
         assert self._my_role.is_leader()
+        if self._heartbeat_timer:
+            self._heartbeat_timer.cancel()
+            self._heartbeat_timer = None
 
     def reset_heartbeat_timeout(self):
         """follower reset heartbeat timeout
@@ -519,5 +585,5 @@ class Raft(object):
             "prevLogIndex": -1,
             "prevLogTerm": -1,
             "entries": [],
-            "leaderCommit": -1,
+            "leaderCommit": self.commit_index,
         }

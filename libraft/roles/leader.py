@@ -91,13 +91,13 @@ class Leader(Role):
         ack_term = rpc_data["term"]
         current_term = self.raft.current_term
 
+        if ack_term < current_term:
+            return
+
         if ack_term > current_term:
             self.raft.stop_heartbeat()
             self.raft.vote_for = -1
             self.raft.to_follower()
-            return
-
-        if ack_term < current_term:
             return
 
         if rpc_data["success"] is False:
