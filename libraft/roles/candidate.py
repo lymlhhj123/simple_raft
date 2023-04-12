@@ -2,7 +2,7 @@
 
 
 from .role import Role
-from .. import models
+from .. import message
 
 
 class Candidate(Role):
@@ -18,7 +18,6 @@ class Candidate(Role):
         """
         self.raft.clear_quorum()
         self.raft.start_election()
-        self.raft.set_election_timeout()
 
     def process_vote_ack(self, rpc):
         """
@@ -26,7 +25,7 @@ class Candidate(Role):
         :param rpc:
         :return:
         """
-        vote_msg = rpc.data
+        vote_msg = rpc.message
         ack_term = vote_msg["term"]
         current_term = self.raft.current_term
         if ack_term < current_term:
@@ -42,7 +41,7 @@ class Candidate(Role):
         if vote_msg["voteGranted"] is False:
             return
 
-        self.raft.add_quorum(rpc.mem_id)
+        self.raft.add_quorum(vote_msg.node_id)
 
         if self.raft.do_i_election_win():
             self.raft.cancel_election_timeout()
@@ -55,7 +54,7 @@ class Candidate(Role):
         :return:
         """
         data = self._process_vote_rpc(rpc)
-        ack_rpc = models.VoteAckRpc(data, self.raft.my_id)
+        ack_rpc = message.RequestVoteAckMessage(data, self.raft.my_id)
         self.raft.send_rpc(rpc.mem_id, ack_rpc)
 
     def _process_vote_rpc(self, rpc):
@@ -64,9 +63,8 @@ class Candidate(Role):
         :param rpc:
         :return:
         """
-        vote_msg = rpc.data
+        vote_msg = rpc.message
         vote_term = vote_msg["term"]
-        candidate_id = vote_msg["candidateId"]
         current_term = self.raft.current_term
         if vote_term <= current_term:
             return {"term": current_term, "voteGranted": False}
@@ -79,7 +77,7 @@ class Candidate(Role):
             vote_granted = False
 
         self.raft.cancel_election_timeout()
-        self.raft.vote_for = candidate_id if vote_granted else -1
+        self.raft.vote_for = vote_msg["candidateId"] if vote_granted else -1
         self.raft.to_follower()
         return {"term": vote_term, "voteGranted": vote_granted}
 
@@ -89,8 +87,8 @@ class Candidate(Role):
         :param rpc:
         :return:
         """
-        rpc_data = rpc.data
-        ack_term = rpc_data["term"]
+        ack_msg = rpc.message
+        ack_term = ack_msg["term"]
 
         if ack_term > self.raft.current_term:
             self.raft.cancel_election_timeout()
@@ -104,11 +102,15 @@ class Candidate(Role):
         :param rpc:
         :return:
         """
-        rpc_data = rpc.data
-        leader_term = rpc_data["term"]
+        append_entries_msg = rpc.message
+        leader_term = append_entries_msg["term"]
 
-        if leader_term >= self.raft.current_term:
+        current_term = self.raft.current_term
+        if leader_term < current_term:
+            pass
+        else:
             self.raft.cancel_election_timeout()
-            self.raft.vote_for = -1
+            self.raft.current_term = leader_term
+            self.raft.vote_for = append_entries_msg["leaderId"]
             self.raft.to_follower()
             self.raft.dispatch_rpc(rpc)

@@ -1,7 +1,7 @@
 # coding: utf-8
 
 from .role import Role
-from .. import models
+from .. import message
 
 
 class Follower(Role):
@@ -23,8 +23,8 @@ class Follower(Role):
         :param rpc:
         :return:
         """
-        vote_ack = rpc.data
-        ack_term = vote_ack["term"]
+        ack_msg = rpc.message
+        ack_term = ack_msg["term"]
         current_term = self.raft.current_term
         if ack_term > current_term:
             self.raft.term = ack_term
@@ -38,7 +38,7 @@ class Follower(Role):
         :return:
         """
         data = self._process_vote_rpc(rpc)
-        vote_ack = models.VoteAckRpc(data, self.raft.my_id())
+        vote_ack = message.RequestVoteAckMessage(data, self.raft.my_id())
         self.raft.send_rpc(rpc.mem_id, vote_ack)
 
     def _process_vote_rpc(self, rpc):
@@ -47,7 +47,7 @@ class Follower(Role):
         :param rpc:
         :return:
         """
-        vote_msg = rpc.data
+        vote_msg = rpc.message
         vote_term = vote_msg["term"]
         candidate_id = vote_msg["candidateId"]
         current_term = self.raft.current_term
@@ -76,8 +76,8 @@ class Follower(Role):
         :param rpc:
         :return:
         """
-        rpc_data = rpc.data
-        ack_term = rpc_data["term"]
+        ack_msg = rpc.message
+        ack_term = ack_msg["term"]
         if ack_term > self.raft.current_term:
             self.raft.current_term = ack_term
             self.raft.vote_for = -1
@@ -90,7 +90,7 @@ class Follower(Role):
         :return:
         """
         result = self._process_append_entries_rpc(rpc)
-        rpc_ack = models.AppendEntriesAckRpc(result, self.raft.my_id())
+        rpc_ack = message.AppendEntriesAckMessage(result, self.raft.my_id())
         self.raft.send_rpc(rpc.mem_id, rpc_ack)
 
     def _process_append_entries_rpc(self, rpc):
@@ -99,12 +99,13 @@ class Follower(Role):
         :param rpc:
         :return:
         """
-        rpc_data = rpc.data
+        rpc_msg = rpc.message
         current_term = self.raft.current_term
-        leader_term = rpc_data["term"]
-        leader_id = rpc_data["leaderId"]
+        leader_term = rpc_msg["term"]
         if leader_term < current_term:
             return {"term": current_term, "success": False}
+
+        leader_id = rpc_msg["leaderId"]
 
         # what happened?
         if leader_term == current_term and self.raft.vote_for != leader_id:
@@ -114,37 +115,14 @@ class Follower(Role):
             self.raft.current_term = leader_term
             self.raft.vote_for = leader_id
 
-        prev_log_index = rpc_data["prevLogIndex"]
-        prev_log_term = rpc_data["prevLogTerm"]
+        prev_log_index = rpc_msg["prevLogIndex"]
+        prev_log_term = rpc_msg["prevLogTerm"]
         if not self.raft.do_i_have_log_entry(prev_log_index, prev_log_term):
             succeed = False
         else:
             succeed = True
-            self.raft.append_log_entries(rpc_data["entries"], rpc_data["leaderCommit"])
+            self.raft.append_log_entries(rpc_msg["entries"], rpc_msg["leaderCommit"])
             self.raft.apply_log_entries()
 
         self.raft.reset_heartbeat_timeout()
         return {"term": leader_term, "success": succeed}
-
-    def _append_entries(self, log_entries, leader_commit):
-        """
-
-        :param log_entries:
-        :param leader_commit:
-        :return:
-        """
-        log_offset = 0
-        for offset, entry in enumerate(log_entries):
-            log_offset = offset
-            my_entry = self.raft.get_log_entry(entry.index)
-            if not my_entry:
-                break
-
-            if my_entry.term != entry.term:
-                self.raft.delete_log_entries(my_entry.index)
-                break
-
-        log_entries = log_entries[log_offset:]
-        if log_entries:
-            self.raft.save_log_entries(log_entries)
-            self.raft.commit_index = min(leader_commit, log_entries[-1].index)

@@ -3,7 +3,7 @@
 from libreactor.internet import TcpServer
 from libreactor.context import ServerContext
 
-from .rpc_protocol import RpcProtocol
+from .rpc_channel import RpcProtocol
 
 
 class RpcContext(ServerContext):

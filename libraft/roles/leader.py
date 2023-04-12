@@ -1,7 +1,7 @@
 # coding: utf-8
 
 from .role import Role
-from .. import models
+from .. import message
 
 
 class Leader(Role):
@@ -26,7 +26,7 @@ class Leader(Role):
         :param rpc:
         :return:
         """
-        vote_ack = rpc.data
+        vote_ack = rpc.message
         ack_term = vote_ack["term"]
         current_term = self.raft.current_term
         if ack_term < current_term:
@@ -53,8 +53,8 @@ class Leader(Role):
         :return:
         """
         data = self._process_vote_rpc(rpc)
-        vote_ack = models.VoteAckRpc(data, self.raft.my_id())
-        self.raft.send_rpc(rpc.mem_id, vote_ack)
+        vote_ack = message.RequestVoteAckMessage(data, self.raft.my_id())
+        rpc.reply(vote_ack)
 
     def _process_vote_rpc(self, rpc):
         """
@@ -62,9 +62,8 @@ class Leader(Role):
         :param rpc:
         :return:
         """
-        vote_msg = rpc.data
+        vote_msg = rpc.message
         vote_term = vote_msg["term"]
-        candidate_id = vote_msg["candidateId"]
         current_term = self.raft.current_term
         if vote_term <= current_term:
             return {"term": current_term, "voteGranted": False}
@@ -77,7 +76,7 @@ class Leader(Role):
             vote_granted = False
 
         self.raft.stop_heartbeat()
-        self.raft.vote_for = candidate_id if vote_granted else -1
+        self.raft.vote_for = vote_msg["candidateId"] if vote_granted else -1
         self.raft.to_follower()
         return {"term": vote_term, "voteGranted": vote_granted}
 
@@ -87,10 +86,9 @@ class Leader(Role):
         :param rpc:
         :return:
         """
-        rpc_data = rpc.data
-        ack_term = rpc_data["term"]
+        ack_msg = rpc.data
+        ack_term = ack_msg["term"]
         current_term = self.raft.current_term
-
         if ack_term < current_term:
             return
 
@@ -100,26 +98,26 @@ class Leader(Role):
             self.raft.to_follower()
             return
 
-        if rpc_data["success"] is False:
-            self._follower_reply_failed(rpc.mem_id)
+        if ack_term["success"] is False:
+            self._follower_reply_failed(ack_msg.node_id)
         else:
-            self._follower_reply_success(rpc.mem_id)
+            self._follower_reply_success(ack_msg.node_id)
 
         self._update_commit_index()
         self.raft.request_append_entries()
 
-    def _follower_reply_failed(self, follower_id):
+    def _follower_reply_failed(self, ack_msg):
         """
 
-        :param follower_id:
+        :param ack_msg:
         :return:
         """
-        self.raft.dec_next_index(follower_id)
+        self.raft.dec_next_index(ack_msg.node_id)
 
-    def _follower_reply_success(self, follower_id):
+    def _follower_reply_success(self, ack_msg):
         """
 
-        :param follower_id:
+        :param ack_msg:
         :return:
         """
         log_index = self.raft.last_log_index()
@@ -165,11 +163,4 @@ class Leader(Role):
         :param rpc:
         :return:
         """
-        rpc_data = rpc.data
-        leader_term = rpc_data["term"]
-
-        if leader_term > self.raft.current_term:
-            self.raft.stop_heartbeat()
-            self.raft.vote_for = -1
-            self.raft.to_follower()
-            self.raft.dispatch_rpc(rpc)
+        assert False, "what happened? more than one leader"
