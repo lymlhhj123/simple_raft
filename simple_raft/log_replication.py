@@ -6,11 +6,11 @@ LOG_REPLICATION = 1
 
 class LogReplication(object):
 
-    def __init__(self, local_addr, cluster_members, loop, raft):
+    def __init__(self, local_addr, cluster_members, raft):
 
         self._local_addr = local_addr
         self._cluster_members = cluster_members
-        self._loop = loop
+        self._loop = raft.asyncio_loop
         self._raft = raft
 
         self._paused = False

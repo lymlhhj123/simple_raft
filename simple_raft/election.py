@@ -3,11 +3,11 @@
 
 class Election(object):
 
-    def __init__(self, local_addr, cluster_members, loop, raft):
+    def __init__(self, local_addr, cluster_members, raft):
 
         self._local_addr = local_addr
         self._cluster_members = cluster_members
-        self._loop = loop
+        self._loop = raft.asyncio_loop
         self._raft = raft
 
         self._vote_granted = 0
@@ -22,9 +22,8 @@ class Election(object):
         self._vote_granted = 0
 
         current_term = self._raft.get_current_term()
-        current_term += 1
-        self._raft.set_current_term(current_term)
-        await self._raft.persist_current_term()
+        await self._raft.update_current_term(current_term + 1)
+        current_term = self._raft.get_current_term()
 
         last_index, last_term = self._raft.get_last_log()
 

@@ -47,19 +47,16 @@ class Raft(object):
         self._last_term = 0
         self._last_index = 0
 
-        # store commit idx which wait to apply
         self._commit_q = loop.create_fifo_queue()
         self._fsm_q = loop.create_fifo_queue()
         self._snapshot_q = loop.create_fifo_queue()
 
-        # this is used by leader, store in-flight log entries
+        # used by leader, store in-flight log entries which wait to commit
         self._flight_entries = deque()
 
-        self._tcp_channel = TcpChannel(local_addr, cluster_members, loop, self)
-
-        self._log_replication = LogReplication(local_addr, cluster_members, loop, self)
-
-        self._leader_election = LeaderElection(local_addr, cluster_members, loop, self)
+        self._tcp_channel = TcpChannel(local_addr, cluster_members, self)
+        self._log_replication = LogReplication(local_addr, cluster_members, self)
+        self._leader_election = Election(local_addr, cluster_members, self)
 
         # follower timer
         self._heartbeat_timer = None
@@ -310,7 +307,7 @@ class Raft(object):
         """dispatch rpc message"""
         if message.is_request_vote_req():
             await self.process_vote_request(message)
-        elif message.is_request_vote_req():
+        elif message.is_request_vote_resp():
             await self.process_vote_request_resp(message)
         elif message.is_append_entries_req():
             await self.process_append_entries_request(message)
