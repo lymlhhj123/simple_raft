@@ -5,6 +5,11 @@ from ..interfaces.snapshot_store import SnapShotStore
 
 class SqliteSnapShotStore(SnapShotStore):
 
+    def __init__(self, snapshot_path, max_cnt=7):
+
+        self.snapshot_path = snapshot_path
+        self.max_cnt = max_cnt
+
     async def list_snapshot(self):
         """list all snapshot"""
 

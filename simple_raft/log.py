@@ -1,38 +1,32 @@
 # coding: utf-8
 
+LOG_UNKNOWN = -1
 LOG_COMMAND = 0
 LOG_NOOP = 1
-LOG_UNKNOWN = 2
 
 
 class LogEntry(object):
 
     def __init__(self):
 
-        self.type = LOG_UNKNOWN
-        self.index = 0
-        self.term = 0
-        self.data = b""
-
-    @classmethod
-    def from_json(cls, data):
-        """construct from python dict"""
-        log = cls()
-        log.type = data["type"]
-        log.index = data["index"]
-        log.term = data["term"]
-        log.data = data["data"]
-        return log
+        self.log_type = LOG_UNKNOWN
+        self.log_index = -1
+        self.log_term = -1
+        self.data = ""
 
     def as_json(self):
-        """return as python dict"""
+        """return as dict"""
         data = {
-            "type": self.type,
-            "index": self.index,
-            "term": self.term,
+            "log_type": self.log_type,
+            "log_index": self.log_index,
+            "log_term": self.log_term,
             "data": self.data
         }
         return data
+
+    def as_tuple(self):
+        """return as tuple"""
+        return self.log_index, self.log_term, self.log_type, self.data
 
 
 class FutureEntry(object):
@@ -43,29 +37,22 @@ class FutureEntry(object):
         self.future = future
 
 
-class LogCreator(object):
+def new_noop_log():
+    """create no-op log entry"""
+    log_entry = LogEntry()
+    log_entry.type = LOG_NOOP
+    log_entry.data = ""
+    return log_entry
 
-    def __init__(self, raft):
 
-        self.raft = raft
-        self.loop = raft.get_loop()
+def new_command_log(data):
+    """create command log entry"""
+    log_entry = LogEntry()
+    log_entry.type = LOG_COMMAND
+    log_entry.data = data
+    return log_entry
 
-    def create_noop_log(self):
-        """create noop log entry"""
-        return self.create_log(LOG_NOOP, "")
 
-    def create_command_log(self, command):
-        """create command log entry"""
-        return self.create_log(LOG_COMMAND, command)
-
-    def create_log(self, log_type, command):
-        """new log entry, we don't set index and term in here"""
-        log_entry = LogEntry()
-        log_entry.type = log_type
-        log_entry.command = command
-        return log_entry
-
-    def wrap_as_future(self, log_entry):
-        """wrap log entry to future entry"""
-        future = self.loop.create_future()
-        return FutureEntry(log_entry, future)
+def wrap_future(log_entry, fut):
+    """wrap log entry to future entry"""
+    return FutureEntry(log_entry, fut)

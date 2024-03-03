@@ -1,7 +1,7 @@
 # coding: utf-8
 
 
-class LeaderElection(object):
+class Election(object):
 
     def __init__(self, local_addr, cluster_members, loop, raft):
 
@@ -14,7 +14,7 @@ class LeaderElection(object):
         self._election_timer = None
 
     def start(self):
-        """election entrypoint, run election func"""
+        """election entrypoint, run election coroutine"""
         self._loop.create_task(self._start_election())
 
     async def _start_election(self):

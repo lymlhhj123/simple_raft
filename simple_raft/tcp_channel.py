@@ -5,7 +5,7 @@ import logging
 import simple_reactor
 
 from .message import Message
-from . import protocol
+from . import rpc_protocol
 
 logger = logging.getLogger()
 
@@ -41,7 +41,7 @@ class TcpChannel(object):
     async def _listen(self):
         """listen tcp on local addr"""
         ip, port = self._local_addr.rsplit(":", 1)
-        # todo: set protocol factory
+        # todo: set tcp protocol factory
         await self._loop.listen_tcp(ip, port)
 
     async def _connect(self, addr):
@@ -49,7 +49,7 @@ class TcpChannel(object):
         ip, port = addr.rsplit(":", 1)
 
         while True:
-            # todo: set protocol factory
+            # todo: set tcp protocol factory
             try:
                 proto = await self._loop.connect_tcp(ip, port)
             except Exception as e:

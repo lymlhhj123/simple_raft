@@ -1,7 +1,5 @@
 # coding: utf-8
 
-import simple_reactor
-
 HEARTBEAT = 0
 LOG_REPLICATION = 1
 
@@ -20,7 +18,7 @@ class LogReplication(object):
         self._next_index = {}
         self._matched_index = {}
 
-        # Keep last contact time with follower
+        # Keep last contact time with followers
         self._last_contact = {}
 
         self._replication_q = self._loop.create_fifo_queue()
@@ -38,7 +36,7 @@ class LogReplication(object):
             self._last_contact[addr] = self._loop.time()
 
     def last_contact(self):
-        """return last contact time all follower"""
+        """return last contact time with all followers"""
         return self._last_contact
 
     def start_heartbeat(self):
@@ -52,12 +50,9 @@ class LogReplication(object):
                 break
 
             for addr in self._cluster_members:
-                if addr == self._local_addr:
-                    continue
-
                 await self._replication_q.put((addr, HEARTBEAT))
 
-            await simple_reactor.sleep(2.0)
+            await self._loop.sleep(2.0)
 
     async def replicate(self):
         """send append entries request to all followers"""
@@ -85,7 +80,7 @@ class LogReplication(object):
             last_index = resp["lastLogIndex"]
             self._next_index[addr] = min(last_index, self._next_index[addr]) - 1
         else:
-            self._update_follower_index(addr, resp["lastAppendIndex"])
+            self._update_next_and_matched_index(addr, resp["lastAppendIndex"])
 
         last_index, _ = self._raft.get_last_log()
         if self._next_index[addr] != (last_index + 1):
@@ -93,7 +88,7 @@ class LogReplication(object):
 
         return self._update_leader_commit()
 
-    def _update_follower_index(self, addr, last_append_index):
+    def _update_next_and_matched_index(self, addr, last_append_index):
         """update follower matched index and next index when replicate log succeed"""
         if last_append_index > 0:
             self._next_index[addr] = last_append_index + 1
@@ -103,10 +98,6 @@ class LogReplication(object):
 
     def _update_leader_commit(self):
         """update leader commit index"""
-        # we update local matched index in here
-        last_index, _ = self._raft.get_last_log()
-        self._matched_index[self._local_addr] = last_index
-
         matched_index = list(self._matched_index.values())
         matched_index.sort(reverse=True)
 
@@ -126,8 +117,10 @@ class LogReplication(object):
                 continue
 
             if addr == self._local_addr:
-                # we should update our last contact time
+                # update self last contact time and matched index
                 self._raft.update_last_contact()
+                last_index, _ = self._raft.get_last_log()
+                self._matched_index[self._local_addr] = last_index
                 continue
 
             next_idx = self._next_index[addr]
@@ -136,7 +129,7 @@ class LogReplication(object):
                 await self._send_heartbeat_request(addr, next_idx)
                 continue
 
-            first_index, _ = await self._raft.get_first_log()
+            first_index, _ = self._raft.get_first_log()
             if next_idx < first_index:
                 # follower log is too far behind us, we should send last snapshot
                 await self._send_install_snapshot_request()
@@ -146,25 +139,15 @@ class LogReplication(object):
 
     async def _send_heartbeat_request(self, addr, next_index):
         """send heartbeat to follower"""
-        await self._send_append_entries_request(addr, next_index, is_heart_beat=True)
+        prev_index, prev_term = await self._prepare_prev_log(next_index)
+        log_entries = []
+        await self._submit_append_entries_request(addr, log_entries, prev_index, prev_term)
 
-    async def _send_append_entries_request(self, addr, next_index, is_heart_beat=False):
+    async def _send_append_entries_request(self, addr, next_index):
         """send append entries request to follower"""
         prev_index, prev_term = await self._prepare_prev_log(next_index)
-        if not is_heart_beat:
-            log_entries = await self._prepare_log_entries(next_index)
-        else:  # if heartbeat, log entries is empty
-            log_entries = []
-
-        req = {
-            "term": self._raft.get_current_term(),
-            "entries": log_entries,
-            "preLogIndex": prev_index,
-            "preLogTerm": prev_term,
-            "leaderCommitIndex": self._raft.get_commit_index()
-        }
-
-        await self._raft.tcp_channel.send_append_entries_request(addr, req)
+        log_entries = await self._prepare_log_entries(next_index)
+        await self._submit_append_entries_request(addr, log_entries, prev_index, prev_term)
 
     async def _prepare_prev_log(self, next_index):
         """"""
@@ -190,6 +173,19 @@ class LogReplication(object):
 
         log_entries = await self._raft.log_store.find_many(next_index, max_index)
         return [log.as_json() for log in log_entries]
+
+    async def _submit_append_entries_request(self, addr, log_entries, prev_index, prev_term):
+        """submit append entries request to tcp channel"""
+
+        req = {
+            "term": self._raft.get_current_term(),
+            "entries": log_entries,
+            "preLogIndex": prev_index,
+            "preLogTerm": prev_term,
+            "leaderCommitIndex": self._raft.get_commit_index()
+        }
+
+        await self._raft.tcp_channel.send_append_entries_request(addr, req)
 
     async def _send_install_snapshot_request(self):
         """send install snapshot request to follower"""

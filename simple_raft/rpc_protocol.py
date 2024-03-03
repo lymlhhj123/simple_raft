@@ -6,7 +6,7 @@ import collections
 from simple_reactor.protocols import IOStream
 
 
-class BaseProtocol(IOStream):
+class RpcProtocol(IOStream):
 
     def __init__(self):
 
@@ -15,7 +15,12 @@ class BaseProtocol(IOStream):
         self._close_waiters = collections.deque()
 
     async def send_message(self, message):
-        """message format: {hdr-len}\r\n{hdr-bytes}\r\n{payload-len}\r\n{payload-bytes}\r\n"""
+        """message format:
+            {hdr-len}\r\n
+            {hdr-bytes}\r\n
+            {payload-len}\r\n
+            {payload-bytes}\r\n
+        """
         await self._send_headers(message.headers)
         await self._send_body(message.payload)
 
@@ -74,7 +79,7 @@ class BaseProtocol(IOStream):
             simple_reactor.future_set_result(waiter, None)
 
 
-class ServerProtocol(BaseProtocol):
+class ServerProtocol(RpcProtocol):
 
     def connection_made(self):
 
@@ -86,6 +91,6 @@ class ServerProtocol(BaseProtocol):
             message = await self.read_message()
 
 
-class ClientProtocol(BaseProtocol):
+class ClientProtocol(RpcProtocol):
 
     pass

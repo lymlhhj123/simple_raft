@@ -3,6 +3,6 @@
 from .raft import Raft
 
 
-def new_raft():
+def new_raft(local_addr, cluster_members, options):
 
     pass

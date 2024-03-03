@@ -22,5 +22,5 @@ class LogStore(object):
     async def insert_many(self, log_entries):
         """put multi log entries to disks"""
 
-    async def delete_many(self, start, end):
+    async def delete_range(self, start, end):
         """delete log where log_index between [start, end]"""

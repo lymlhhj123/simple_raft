@@ -5,17 +5,17 @@ import logging
 from collections import deque
 
 from . import const
-from .log import LogCreator
+from . import log
 from .log_replication import LogReplication
 from .tcp_channel import TcpChannel
-from .leader_election import LeaderElection
+from .election import Election
 
 logger = logging.getLogger()
 
 
 class Raft(object):
 
-    def __init__(self, loop, local_addr, cluster_members, fsm, log_store, stable_store, snapshot_store, options):
+    def __init__(self, loop, local_addr, cluster_members, fsm_store, log_store, stable_store, snapshot_store, options):
 
         self._local_id = local_addr
         self._local_addr = local_addr
@@ -29,15 +29,14 @@ class Raft(object):
         self._leader_addr = ""
         self._leader_id = ""
 
-        self._log_creator = LogCreator(self)
-
-        self._fsm = fsm
+        self._fsm_store = fsm_store
         self._log_store = log_store
         self._stable_store = stable_store
         self._snapshot_store = snapshot_store
 
         self._state = const.RAFT_FOLLOWER
 
+        # keep last time contact with leader
         self._last_contact = 0
 
         # first raft log
@@ -94,14 +93,9 @@ class Raft(object):
         return self._log_replication
 
     @property
-    def log_creator(self):
-        """return log creator"""
-        return self._log_creator
-
-    @property
-    def fsm(self):
+    def fsm_store(self):
         """return fsm which log apply to"""
-        return self._fsm
+        return self._fsm_store
 
     @property
     def log_store(self):
@@ -189,7 +183,7 @@ class Raft(object):
         self._current_term = term
 
         # persist current term to disk
-        await self._stable_store.put_uint64(const.CURRENT_TERM, self._current_term)
+        await self.stable_store.put_int(const.CURRENT_TERM, self._current_term)
 
         # we also clear leader
         self.set_leader("", "")
@@ -231,16 +225,12 @@ class Raft(object):
             const.LAST_VOTE_TERM: voted_term,
             const.LAST_VOTE_CANDIDATE: voted_candidate
         }
-        vote_info = json.dumps(data)
-        await self.stable_store.put(const.LAST_VOTE_KEY, vote_info)
+        await self.stable_store.put(const.LAST_VOTE_KEY, json.dumps(data))
 
     async def get_last_vote(self):
         """get last vote term and candidate"""
         data = await self.stable_store.get(const.LAST_VOTE_KEY)
-        if data:
-            vote_info = json.load(data)
-        else:
-            vote_info = {}
+        vote_info = json.load(data) if data else {}
 
         last_vote_term = vote_info.get(const.LAST_VOTE_TERM, 0)
         last_vote_candidate = vote_info.get(const.LAST_VOTE_CANDIDATE, "")
@@ -277,8 +267,10 @@ class Raft(object):
         self.log_replication.start_heartbeat()
 
         # create noop log entry used by set commit index
-        log_entry = self.log_creator.create_noop_log()
-        future_log = self.log_creator.wrap_as_future(log_entry)
+        log_entry = log.new_noop_log()
+
+        future = self.asyncio_loop.create_future()
+        future_log = log.wrap_future(log_entry, future)
         await self.process_logs([future_log])
 
     def check_leader_lease(self):
@@ -326,8 +318,10 @@ class Raft(object):
             await self.process_append_entries_resp(message)
         elif message.is_install_snapshot_req():
             pass
+            # todo
         elif message.is_install_snapshot_resp():
             pass
+            # todo
         else:
             pass
 
@@ -428,16 +422,15 @@ class Raft(object):
             "succeed": False,
             "lastLogIndex": last_index,
             "lastAppendIndex": last_append_index,
-            "term": current_term,
+            "term": req["term"],
         }
 
         if req["term"] < current_term:
+            resp["term"] = current_term
             return resp
 
-        # update last activity time
+        # update last activity time with leader
         self.update_last_contact()
-
-        resp["term"] = req["term"]
 
         if req["term"] > current_term:
             await self.update_current_term(req["term"])
@@ -447,8 +440,9 @@ class Raft(object):
 
         if req["prevLogIndex"] > 0:
             local_log = await self.get_log_entry(req["prevLogIndex"])
-            # log conflict
-            if local_log.term != req["prevLogTerm"]:
+            # prev log conflict
+            if not local_log or local_log.term != req["prevLogTerm"]:
+                logger.warning(f"prevLog conflict: {req["prevLogIndex"]}->{req["prevLogTerm"]}, reject request")
                 return resp
 
         new_logs = []
@@ -471,15 +465,13 @@ class Raft(object):
             self.set_last_log(new_logs[-1].index, new_logs[-1].term)
 
         last_index, _ = self.get_last_log()
-        leader_commit = min(req["leaderCommitIndex"], last_index)
+        commit_index = min(req["leaderCommitIndex"], last_index)
         local_commit = self.get_commit_index()
-        commit_idx = max(local_commit, leader_commit)
+        commit_index = max(local_commit, commit_index)
 
-        # update commit index
-        if commit_idx > local_commit:
-            self.set_commit_index(commit_idx)
-            # wakeup coroutine to apply logs
-            await self._commit_q.put(commit_idx)
+        self.set_commit_index(commit_index)
+        # wakeup coroutine to apply logs
+        await self._commit_q.put(commit_index)
 
         resp["lastLogIndex"] = last_index
         resp["succeed"] = True
@@ -498,9 +490,7 @@ class Raft(object):
             await self.update_current_term(resp["term"])
             return
 
-        # we are not leader, ignore it
-        if not self.is_leader():
-            return
+        assert self.is_leader(), "we must be leader here"
 
         leader_commit = await self.log_replication.process_append_entries_resp(message.addr(), resp)
 
@@ -522,10 +512,12 @@ class Raft(object):
 
         this method only called on leader
         """
-        assert self.is_leader()
+        assert self.is_leader(), "i am not leader"
 
-        log_entry = self.log_creator.create_command_log(command)
-        future_entry = self.log_creator.wrap_as_future(log_entry)
+        log_entry = log.new_command_log(command)
+
+        future = self.asyncio_loop.create_future()
+        future_entry = log.wrap_future(log_entry, future)
 
         await self.process_logs([future_entry])
 
@@ -536,7 +528,7 @@ class Raft(object):
 
         this method only called on leader
         """
-        assert self.is_leader()
+        assert self.is_leader(), "i am not leader"
 
         last_index, _ = self.get_last_log()
         current_term = self.get_current_term()
@@ -565,7 +557,7 @@ class Raft(object):
         max_apply_entries = self.options.max_apply_entries
         while True:
             committed_idx = await self._commit_q.get()
-            applied_idx, _ = await self.fsm.last()
+            applied_idx, _ = await self.fsm_store.last_apply_info()
 
             if committed_idx <= applied_idx:
                 continue
@@ -592,11 +584,11 @@ class Raft(object):
         while True:
             waiter, op, args = await self._fsm_q.get()
             if op == const.OP_FSM_TAKE_SNAPSHOT:
-                await self.fsm.take_snapshot()
+                await self.fsm_store.take_snapshot()
             elif op == const.OP_FSM_APPLY_LOG:
-                await self.fsm.apply(args)
+                await self.fsm_store.apply(args)
             elif op == const.OP_FSM_RESTORE_SNAPSHOT:
-                await self.fsm.restore_snapshot(args)
+                await self.fsm_store.restore_snapshot(args)
             else:
                 # unknown op
                 pass
@@ -622,7 +614,7 @@ class Raft(object):
     async def _should_snapshot(self):
         """return True if we should create snapshot, otherwise False"""
         first_index, _ = self.get_first_log()
-        last_applied, _ = await self.fsm.last()
+        last_applied, _ = await self.fsm_store.last_apply_info()
 
         diff = last_applied - first_index
         return diff >= self.options.snapshot_threshold
